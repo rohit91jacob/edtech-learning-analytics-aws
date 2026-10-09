@@ -1,0 +1,111 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edtech-learning-analytics-aws"
+version = "0.1.0"
+description = "Mastery-learning analytics on the Open University Learning Analytics Dataset: S3 -> EMR Serverless PySpark -> Iceberg -> dbt (Athena) -> Step Functions, emulated locally."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "rohit91jacob" }]
+keywords = ["learning-analytics", "oulad", "pyspark", "iceberg", "dbt", "athena", "emr-serverless", "step-functions"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Database",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+  # Pinned to what Amazon EMR 7.14.0 ships (Spark 3.5.8, Iceberg 1.10.1), so the same job
+  # code runs locally and on EMR Serverless. The Iceberg runtime jar version lives in config.py.
+  "pyspark==3.5.8",
+  "duckdb==1.5.6",
+  "dbt-core>=1.11,<1.13",
+  "dbt-duckdb==1.11.0",
+  "pyarrow>=21",
+  "scikit-learn>=1.7,<2",
+  "pandas>=2.2,<4",
+  "boto3>=1.40,<2",
+  "requests>=2.32,<3",
+]
+
+[project.optional-dependencies]
+# Only needed to compile (not run) the dbt project against the Athena target.
+athena = ["dbt-athena==1.11.1"]
+
+[project.scripts]
+edtech = "edtech_analytics.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/rohit91jacob/edtech-learning-analytics-aws"
+Data = "https://doi.org/10.6084/m9.figshare.5081998.v1"
+
+[dependency-groups]
+dev = [
+  "pytest>=9,<10",
+  "pytest-cov>=7,<8",
+  "ruff>=0.16,<0.17",
+  "pre-commit>=4,<5",
+  "moto[s3,stepfunctions,kms]>=5.1,<6",
+  "sqlglot>=27",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edtech_analytics"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+extend-exclude = ["dbt/target", "dbt/dbt_packages", "dbt/logs", "data", "site"]
+
+[tool.ruff.per-file-target-version]
+# These modules are shipped to EMR Serverless, whose Amazon Linux 2023 image runs Python 3.9.
+"src/edtech_analytics/spark/**" = "py39"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF", "PTH", "PIE", "RET", "TID", "N", "S", "T20"]
+ignore = [
+  "RET504", # assigning before return keeps Spark pipelines readable
+  "E501",   # ruff format owns line length; long SQL strings are left intact
+  "S608",   # SQL is built from fixed identifiers in this repo, never from user input
+  "N812",   # `from pyspark.sql import functions as F` is the PySpark idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PTH", "S603", "S607", "S105", "S106"]
+"scripts/**" = ["T201", "S310", "S311"]
+# The EMR job reports results on stdout, which EMR Serverless ships to the job's log URI.
+"src/edtech_analytics/spark/job.py" = ["T201"]
+# Typographic en dashes are intended in the results page.
+"src/edtech_analytics/report/site.py" = ["RUF001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["edtech_analytics"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "spark: needs a local Spark JVM (Java 17); the Iceberg runtime jar is fetched from Maven Central",
+  "e2e: end-to-end pipeline runs on the committed fixtures",
+  "localstack: needs a LocalStack endpoint at EDTECH_AWS_ENDPOINT_URL (CI only)",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning:pyspark.*",
+  "ignore::DeprecationWarning:dbt.*",
+]
+
+[tool.coverage.run]
+source = ["edtech_analytics"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
