@@ -1,0 +1,154 @@
+{
+  "Comment": "OULAD learning analytics: raw S3 -> EMR Serverless (silver, DQ, features, DQ) -> dbt on Athena. Rendered by Terraform (templatefile) and by the local runner.",
+  "StartAt": "BuildSilver",
+  "States": {
+    "BuildSilver": {
+      "Type": "Task",
+      "Comment": "Raw CSV -> typed silver Iceberg tables",
+      "Resource": "arn:aws:states:::emr-serverless:startJobRun.sync",
+      "Parameters": {
+        "ApplicationId": "${application_id}",
+        "ExecutionRoleArn": "${job_role_arn}",
+        "Name": "edtech-silver",
+        "ExecutionTimeoutMinutes": 60,
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint": "${code_uri}/job.py",
+            "EntryPointArguments": ["silver", "--catalog", "${catalog}", "--namespace", "${silver_db}", "--warehouse", "${warehouse_uri}", "--raw-root", "${raw_uri}"],
+            "SparkSubmitParameters": "${spark_submit_parameters}"
+          }
+        },
+        "ConfigurationOverrides": {
+          "MonitoringConfiguration": {
+            "S3MonitoringConfiguration": {"LogUri": "${logs_uri}"}
+          }
+        }
+      },
+      "ResultPath": "$.silver",
+      "Retry": [
+        {"ErrorEquals": ["EMRServerless.ThrottlingException", "EMRServerless.InternalServerException"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2}
+      ],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "SilverQualityGate"
+    },
+    "SilverQualityGate": {
+      "Type": "Task",
+      "Comment": "30 silver checks; any error-level failure exits 3 and fails the job run",
+      "Resource": "arn:aws:states:::emr-serverless:startJobRun.sync",
+      "Parameters": {
+        "ApplicationId": "${application_id}",
+        "ExecutionRoleArn": "${job_role_arn}",
+        "Name": "edtech-dq-silver",
+        "ExecutionTimeoutMinutes": 30,
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint": "${code_uri}/job.py",
+            "EntryPointArguments": ["dq", "--layer", "silver", "--catalog", "${catalog}", "--namespace", "${silver_db}", "--warehouse", "${warehouse_uri}"],
+            "SparkSubmitParameters": "${spark_submit_parameters}"
+          }
+        },
+        "ConfigurationOverrides": {
+          "MonitoringConfiguration": {
+            "S3MonitoringConfiguration": {"LogUri": "${logs_uri}"}
+          }
+        }
+      },
+      "ResultPath": "$.silver_dq",
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "BuildActivityFeatures"
+    },
+    "BuildActivityFeatures": {
+      "Type": "Task",
+      "Comment": "10.6M clickstream rows -> weekly activity and engagement tables",
+      "Resource": "arn:aws:states:::emr-serverless:startJobRun.sync",
+      "Parameters": {
+        "ApplicationId": "${application_id}",
+        "ExecutionRoleArn": "${job_role_arn}",
+        "Name": "edtech-features",
+        "ExecutionTimeoutMinutes": 60,
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint": "${code_uri}/job.py",
+            "EntryPointArguments": ["features", "--catalog", "${catalog}", "--namespace", "${silver_db}", "--warehouse", "${warehouse_uri}"],
+            "SparkSubmitParameters": "${spark_submit_parameters}"
+          }
+        },
+        "ConfigurationOverrides": {
+          "MonitoringConfiguration": {
+            "S3MonitoringConfiguration": {"LogUri": "${logs_uri}"}
+          }
+        }
+      },
+      "ResultPath": "$.features",
+      "Retry": [
+        {"ErrorEquals": ["EMRServerless.ThrottlingException", "EMRServerless.InternalServerException"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2}
+      ],
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "FeatureQualityGate"
+    },
+    "FeatureQualityGate": {
+      "Type": "Task",
+      "Comment": "Feature tables reconcile exactly with the clickstream",
+      "Resource": "arn:aws:states:::emr-serverless:startJobRun.sync",
+      "Parameters": {
+        "ApplicationId": "${application_id}",
+        "ExecutionRoleArn": "${job_role_arn}",
+        "Name": "edtech-dq-features",
+        "ExecutionTimeoutMinutes": 30,
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint": "${code_uri}/job.py",
+            "EntryPointArguments": ["dq", "--layer", "features", "--catalog", "${catalog}", "--namespace", "${silver_db}", "--warehouse", "${warehouse_uri}"],
+            "SparkSubmitParameters": "${spark_submit_parameters}"
+          }
+        },
+        "ConfigurationOverrides": {
+          "MonitoringConfiguration": {
+            "S3MonitoringConfiguration": {"LogUri": "${logs_uri}"}
+          }
+        }
+      },
+      "ResultPath": "$.features_dq",
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "DbtBuildAndTest"
+    },
+    "DbtBuildAndTest": {
+      "Type": "Task",
+      "Comment": "dbt build (models + tests) against Athena; failing tests fail the build",
+      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+      "Parameters": {
+        "ProjectName": "${dbt_project_name}"
+      },
+      "ResultSelector": {"BuildId.$": "$.Build.Id", "BuildStatus.$": "$.Build.BuildStatus"},
+      "ResultPath": "$.dbt",
+      "Catch": [{"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"}],
+      "Next": "NotifySuccess"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${topic_arn}",
+        "Subject": "edtech pipeline succeeded",
+        "Message.$": "States.Format('edtech pipeline {} succeeded', $$.Execution.Name)"
+      },
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${topic_arn}",
+        "Subject": "edtech pipeline FAILED",
+        "Message.$": "States.JsonToString($.error)"
+      },
+      "ResultPath": null,
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineFailed",
+      "Cause": "A pipeline step failed; the SNS message carries the error and the execution history has the details."
+    }
+  }
+}
