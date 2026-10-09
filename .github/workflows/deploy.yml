@@ -1,0 +1,98 @@
+name: deploy
+
+# Optional deployment of job artefacts to a real AWS account, and an optional pipeline run.
+# It does nothing unless the repository variable AWS_DEPLOY_ROLE_ARN is set (output of
+# `terraform apply` with enable_github_oidc = true). Authentication is GitHub OIDC federation:
+# there are no static AWS keys anywhere. Infrastructure itself is applied by a human
+# (see docs/runbook.md#deploying-to-aws); this workflow cannot change it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      land_raw:
+        description: "Download OULAD and mirror it to the raw bucket"
+        type: boolean
+        default: false
+      start_pipeline:
+        description: "Start the Step Functions pipeline after uploading"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  UV_LOCKED: "1"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  gate:
+    name: deployment configured?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AWS_DEPLOY_ROLE_ARN is not set: nothing to deploy (this is the default)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: upload artefacts (OIDC)
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: aws-dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      CODE_BUCKET: ${{ vars.EDTECH_CODE_BUCKET }}
+      RAW_BUCKET: ${{ vars.EDTECH_RAW_BUCKET }}
+      STATE_MACHINE_ARN: ${{ vars.EDTECH_STATE_MACHINE_ARN }}
+      KMS_KEY_ARN: ${{ vars.EDTECH_KMS_KEY_ARN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: edtech-deploy-${{ github.run_id }}
+      - run: uv sync --frozen
+      - name: Build EMR Serverless artefacts and the dbt bundle
+        run: |
+          uv run edtech package-emr --out dist/emr
+          zip -qr dist/edtech-dbt.zip dbt pyproject.toml uv.lock README.md LICENSE src -x 'dbt/target/*' 'dbt/logs/*'
+      - name: Upload to the code bucket (SSE-KMS)
+        run: |
+          aws s3 cp dist/emr/job.py "s3://$CODE_BUCKET/jobs/job.py" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ARN"
+          aws s3 cp dist/emr/edtech_spark.zip "s3://$CODE_BUCKET/jobs/edtech_spark.zip" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ARN"
+          aws s3 cp dist/edtech-dbt.zip "s3://$CODE_BUCKET/dbt/edtech-dbt.zip" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ARN"
+      - name: Land OULAD in the raw bucket
+        if: inputs.land_raw
+        env:
+          EDTECH_DATA_DIR: /tmp/edtech
+        run: |
+          uv run edtech ingest
+          uv run edtech land-s3 --bucket "$RAW_BUCKET" --kms-key-id "$KMS_KEY_ARN"
+      - name: Start the pipeline
+        if: inputs.start_pipeline
+        run: |
+          aws stepfunctions start-execution --state-machine-arn "$STATE_MACHINE_ARN" \
+            --name "deploy-${{ github.run_id }}" --input '{"trigger":"deploy"}'

@@ -1,0 +1,108 @@
+name: refresh
+
+# Weekly rebuild of the results site from the public OULAD download.
+#
+# The data is a static 2013-2014 release (unchanged on figshare since 2017, md5-pinned), so the
+# weekly run does not bring new learners. It re-proves that the whole pipeline still works from
+# the public source with current dependencies, and republishes the site. Weekly is plenty; there
+# is no faster upstream cadence to match. No credentials are used: the source is public and
+# Pages deploys with the built-in GITHUB_TOKEN.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+env:
+  UV_LOCKED: "1"
+  PYTHON_VERSION: "3.12"
+  EDTECH_DATA_DIR: /home/runner/edtech-lake
+  EDTECH_LOG_FORMAT: json
+  EDTECH_SPARK_DRIVER_MEMORY: 6g
+
+jobs:
+  build:
+    name: full pipeline on the real download + build site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - name: Cache the Iceberg runtime jar
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.ivy2
+          key: ivy-iceberg-1.10.1-${{ runner.os }}
+      - name: Cache the OULAD archive (static; the md5 is pinned in config.py)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.EDTECH_DATA_DIR }}/downloads
+          key: oulad-figshare-file-8606371
+      - run: uv sync --frozen
+      - name: Pipeline (exit 3 = data-quality gate, 4 = verification mismatch)
+        run: uv run edtech pipeline --report site
+      - name: Summary
+        run: |
+          echo "### Results site" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat site/summary.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: publish to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  alert:
+    name: open or update a failure issue
+    needs: [build, deploy]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: Scheduled refresh is failing
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or comment on the tracking issue
+        run: |
+          body="The scheduled \`refresh\` run failed: $RUN_URL
+
+          See docs/runbook.md#scheduled-refresh-failed. Close this issue once a run is green."
+          number=$(gh issue list --state open --search "in:title \"$TITLE\"" --json number,title \
+            --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
