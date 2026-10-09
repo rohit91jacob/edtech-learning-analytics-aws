@@ -47,11 +47,8 @@ jobs:
         with:
           path: ~/.ivy2
           key: ivy-iceberg-1.10.1-${{ runner.os }}
-      - name: Cache the OULAD archive (static; the md5 is pinned in config.py)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.EDTECH_DATA_DIR }}/downloads
-          key: oulad-figshare-file-8606371
+      # The 47 MB archive is deliberately NOT cached: a weekly run that always reused a cached copy
+      # would never exercise the public download it claims to prove (the md5 pin still applies).
       - run: uv sync --frozen
       - name: Pipeline (exit 3 = data-quality gate, 4 = verification mismatch)
         run: uv run edtech pipeline --report site

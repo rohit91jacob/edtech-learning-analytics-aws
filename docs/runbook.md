@@ -76,8 +76,10 @@ make pipeline
 `refresh.yml` opens (or comments on) an issue titled **Scheduled refresh is failing**.
 
 1. Open the linked run. The pipeline step's exit code tells you the class of failure (above).
-2. Network errors on figshare: re-run the workflow; the archive cache usually makes the second
-   attempt avoid the download entirely.
+2. Network errors on figshare: re-run the workflow. The archive is deliberately not cached in
+   CI, so every refresh re-downloads it; if figshare stays down the UCI mirror is tried next and
+   recorded as the `source` in the raw `_manifest.json` (that mirror is not md5-pinned, so the
+   strict verification step is what guards it).
 3. Dependency breakage (Dependabot merged a bad minor version): reproduce with `uv sync --frozen`
    at that commit, pin or revert.
 4. Close the issue after a green run. `keepalive.yml` re-enables the schedule twice a month, so

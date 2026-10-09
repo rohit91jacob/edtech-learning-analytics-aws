@@ -79,7 +79,7 @@ flowchart LR
 
 | Component | Code | What it does |
 |---|---|---|
-| Ingest | `ingest/landing.py` | Downloads the archive (retries, md5 check, UCI fallback), checks every header, lands it content-addressed with a manifest; `CURRENT` is written last. Reruns are no-ops. |
+| Ingest | `ingest/landing.py` | Downloads the archive (retries, md5 check, UCI fallback), checks every header, lands it content-addressed with a manifest that records the URL it really came from; `CURRENT` is written last. Downloaded data is always verified strictly. Reruns are no-ops. |
 | S3 landing | `ingest/s3.py` | Mirrors the raw version to a bucket with SSE-KMS; skips objects whose sha256 is already there. Tested on moto and LocalStack. |
 | Silver job | `spark/silver.py` | Reads every column as a string, normalises both missing-value encodings, casts explicitly and **counts** cast failures, writes Iceberg v2 (zstd) tables atomically. |
 | Features job | `spark/features.py` | Aggregates the 10.6M-row clickstream to enrolment × week (× activity type) so the warehouse never scans the raw clicks. |
@@ -172,7 +172,7 @@ git clone https://github.com/rohit91jacob/edtech-learning-analytics-aws.git
 cd edtech-learning-analytics-aws
 uv sync --frozen --all-extras
 
-make pipeline-fixtures   # the committed 288-student sample: about 6 minutes
+make pipeline-fixtures   # the committed 288-student sample: 2-6 minutes
 make pipeline            # the full release: download, Spark, dbt, model, verification, site
 open site/index.html
 ```
@@ -228,7 +228,7 @@ pages before deploying.
 ## Testing and CI
 
 ```bash
-uv run pytest tests/unit     # 37 tests, no JVM (ingest, moto S3/KMS/Step Functions, ASL, packaging)
+uv run pytest tests/unit     # 39 tests, no JVM (ingest, moto S3/KMS/Step Functions, ASL, packaging)
 uv run pytest tests/spark    # 11 tests (about 13 minutes): Spark + Iceberg + dbt end to end on the fixtures
 ```
 

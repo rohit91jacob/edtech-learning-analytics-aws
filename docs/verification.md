@@ -41,8 +41,10 @@ Sources:
 | unregistered students are Withdrawn | [P] studentRegistration | all | 9 unregistered are not Withdrawn; 93 Withdrawn have no unregistration day | documented mismatch (2) |
 | non-exam weights sum to 100%, exams 100% | [P] assessments | "typically" | GGG 2013J, 2014B, 2014J sum to 0%; all 24 exams at 100% | documented mismatch (3) |
 
-1. **32,953 vs 32,593.** `OULAD.names` swaps two digits. The paper, the figshare archive and the
-   UCI archive all have 32,593 rows in `studentInfo.csv`.
+1. **32,953 vs 32,593.** `OULAD.names` swaps two digits (both its "students in courses" and
+   its "registration entries" lines say 32953; re-checked in the UCI archive on 10 October 2026).
+   The paper, the figshare archive and the UCI archive all have 32,593 rows in `studentInfo.csv`
+   and `studentRegistration.csv`.
 2. **Withdrawals without dates, and dates without withdrawals.** The paper says students who
    unregistered have `final_result = 'Withdrawn'`. In the release 9 enrolments with an
    unregistration day are `Fail`, and 93 `Withdrawn` enrolments have no unregistration day. The
