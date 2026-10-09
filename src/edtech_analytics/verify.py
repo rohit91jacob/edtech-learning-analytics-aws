@@ -206,8 +206,16 @@ def write_report(settings: Settings, results: list[Verification], strict: bool) 
 
 
 def is_full_release(settings: Settings) -> bool:
-    """True when the current raw version came from the official archive (not a sample)."""
+    """True when this run must reproduce the published figures (strict verification).
+
+    Anything that was downloaded (figshare, or the UCI mirror, which is not md5-pinned) claims to
+    be the official release, so it is always checked strictly: a truncated or altered download
+    then fails verification (exit 4) instead of being reported as a "sample". A local archive
+    (the committed fixtures, ``--archive``) is strict only if it has the full clickstream.
+    """
     manifest = json.loads(
         (settings.current_raw_version() / "_manifest.json").read_text(encoding="utf-8")
     )
+    if str(manifest.get("source", "")).startswith(("https://", "http://")):
+        return True
     return manifest["row_counts"].get("studentVle") == oulad.PUBLISHED_ROW_COUNTS["studentVle"]

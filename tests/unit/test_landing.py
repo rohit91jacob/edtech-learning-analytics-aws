@@ -100,3 +100,33 @@ def test_download_verifies_checksum_and_reuses_cache(settings, fixtures_dir, mon
     path = landing.download(bad)  # primary fails the checksum, fallback mirror is used
     assert calls[-1] == bad.fallback_url
     assert path.exists()
+
+
+def test_fallback_download_is_recorded_as_the_source(settings, fixtures_dir, monkeypatch, tmp_path):
+    archive = tmp_path / "src.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for path in fixtures_dir.iterdir():
+            zf.write(path, path.name)
+
+    def fake_fetch(url, target, _settings):
+        shutil.copy(archive, target)
+
+    monkeypatch.setattr(landing, "_fetch", fake_fetch)
+    # The primary fails its md5 pin, so the (unpinned) UCI mirror is what actually lands.
+    pinned = settings.__class__(data_dir=settings.data_dir, source_md5="0" * 32, http_retries=1)
+    result = landing.ingest(pinned)
+    assert result.manifest["source"] == pinned.fallback_url
+    unpinned = settings.__class__(data_dir=tmp_path / "other", source_md5=None, http_retries=1)
+    assert landing.ingest(unpinned).manifest["source"] == unpinned.source_url
+
+
+def test_downloaded_data_is_always_verified_strictly(settings, fixtures_dir, tmp_path):
+    from edtech_analytics.verify import is_full_release
+
+    land(settings, fixtures_dir)  # committed sample via --archive: not strict
+    assert not is_full_release(settings)
+    # Same (short) content arriving from a URL claims to be the release: a truncated download
+    # must fail strict verification rather than be published as a "sample".
+    downloaded = settings.__class__(data_dir=tmp_path / "dl", source_md5=None)
+    land(downloaded, fixtures_dir, source_url=downloaded.fallback_url)
+    assert is_full_release(downloaded)

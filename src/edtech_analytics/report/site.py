@@ -16,6 +16,7 @@ import duckdb
 
 from edtech_analytics import oulad
 from edtech_analytics.config import Settings
+from edtech_analytics.verify import is_full_release
 
 # Categorical slots 1-4 of the validated reference palette (light / dark steps).
 SERIES = {
@@ -321,7 +322,7 @@ def _build(con, settings: Settings, out_dir: Path) -> dict:
     ).fetchall()
     dq_rows = _dq_summary(con, settings)
     generated = datetime.now(UTC).isoformat(timespec="seconds")
-    full = manifest["row_counts"]["studentVle"] == oulad.PUBLISHED_ROW_COUNTS["studentVle"]
+    full = is_full_release(settings)
 
     summary = {
         "generated_at": generated,

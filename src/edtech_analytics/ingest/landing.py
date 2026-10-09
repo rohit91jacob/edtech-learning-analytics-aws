@@ -83,9 +83,24 @@ def download(settings: Settings, *, force: bool = False) -> Path:
                 target.unlink(missing_ok=True)
                 errors.append(f"{url}: md5 {actual} != expected {settings.source_md5}")
                 continue
+        # Record which URL the archive really came from (the fallback mirror is not md5-pinned),
+        # so the raw manifest's provenance is right on this and every cached rerun.
+        _write_atomic(_source_marker(target), url)
         log.info("downloaded archive", extra={"url": url, "bytes": target.stat().st_size})
         return target
     raise IngestError("could not download OULAD: " + "; ".join(errors))
+
+
+def _source_marker(archive: Path) -> Path:
+    return archive.with_name(archive.name + ".source")
+
+
+def archive_source(archive: Path, default: str) -> str:
+    """URL a downloaded archive came from (``default`` for archives cached before the marker)."""
+    marker = _source_marker(archive)
+    if marker.exists():
+        return marker.read_text(encoding="utf-8").strip() or default
+    return default
 
 
 def _fetch(url: str, target: Path, settings: Settings) -> None:
@@ -220,4 +235,4 @@ def ingest(
     if archive is not None:
         return land(settings, archive)
     path = download(settings, force=force)
-    return land(settings, path, source_url=settings.source_url)
+    return land(settings, path, source_url=archive_source(path, settings.source_url))
