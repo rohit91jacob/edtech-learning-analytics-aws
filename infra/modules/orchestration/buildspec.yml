@@ -1,0 +1,14 @@
+version: 0.2
+
+# Runs inside CodeBuild with the dbt project zip (dbt/ + pyproject.toml + uv.lock) as source.
+phases:
+  install:
+    commands:
+      - curl -LsSf https://astral.sh/uv/0.10.2/install.sh | sh
+      - export PATH="$HOME/.local/bin:$PATH"
+      - uv sync --frozen --no-dev --extra athena
+  build:
+    commands:
+      - export PATH="$HOME/.local/bin:$PATH"
+      - cd dbt
+      - uv run dbt build --profiles-dir . --target athena

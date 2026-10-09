@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) for a real deployment.
+aws_region          = "eu-west-2"
+environment         = "dev"
+monthly_budget_usd  = 25
+notification_emails = ["you@example.com"]
+enable_schedule     = false
+enable_github_oidc  = true
