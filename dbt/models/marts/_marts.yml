@@ -1,0 +1,116 @@
+version: 2
+
+models:
+  - name: dim_module_presentation
+    description: One row per module presentation with size, assessment counts and outcome mix.
+    columns:
+      - name: presentation_key
+        data_tests: [unique, not_null]
+      - name: n_enrolments
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 1
+
+  - name: mart_engagement_weekly_cohorts
+    description: >
+      Weekly VLE engagement per cohort. cohort_dimension is registration_timing (early / on_time /
+      late / unknown) or final_result. pct_active_of_registered uses students still registered at
+      the start of the week as the denominator.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [presentation_key, cohort_dimension, cohort_value, course_week]
+    columns:
+      - name: cohort_dimension
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["registration_timing", "final_result"]
+      - name: pct_active_of_enrolled
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: mart_assessment_mastery_funnel
+    description: >
+      Funnel per assessment: enrolled -> submitted -> passed (score >= 40, OULAD's pass mark) ->
+      mastered (score >= var mastery_threshold, default 70). Exam results are mostly absent from
+      the release (has_results = false).
+    columns:
+      - name: id_assessment
+        data_tests: [unique, not_null]
+      - name: submission_rate
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: fct_first_submission
+    description: One row per enrolment with the day of the first (non-banked) submission.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [presentation_key, id_student]
+
+  - name: mart_time_to_first_submission
+    description: Distribution of the first submission day per presentation and final result.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [presentation_key, final_result]
+
+  - name: mart_dropout_risk_features
+    description: >
+      Withdrawal-risk features as of var risk_cutoff_day (default day 28), one row per enrolment
+      still registered on that day. split = 'test' for the held-out presentation
+      (var holdout_presentation, default 2014J).
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [presentation_key, id_student]
+    columns:
+      - name: split
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["train", "test"]
+      - name: label_withdrawn
+        data_tests: [not_null]
+      - name: clicks_to_cutoff
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+
+  - name: mart_vle_activity_effectiveness
+    description: >
+      Usage of each VLE activity type among students who stayed to the end, and pass rates of users
+      vs non-users. Associational only; see the model SQL header.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [code_module, activity_type]
+    columns:
+      - name: usage_rate
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: mart_outcome_fairness_slices
+    description: Outcome rates and gaps (percentage points vs overall) by age band, IMD band and disability.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [slice_dimension, slice_value]
+    columns:
+      - name: slice_dimension
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["overall", "age_band", "imd_band", "disability"]

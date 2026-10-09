@@ -1,0 +1,27 @@
+version: 2
+
+seeds:
+  - name: module_domains
+    description: >
+      Study domain of each OULAD module, from Table 1 of Kuzilek, Hlosta & Zdrahal (2017),
+      Scientific Data 4:170171 (CC BY 4.0).
+    config:
+      column_types:
+        code_module: varchar
+        domain: varchar
+    columns:
+      - name: code_module
+        data_tests: [unique, not_null]
+      - name: domain
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["STEM", "Social Sciences"]
+  - name: course_weeks
+    description: Week spine from 4 weeks before the start to week 39 (longest presentation is 269 days).
+    config:
+      column_types:
+        course_week: integer
+    columns:
+      - name: course_week
+        data_tests: [unique, not_null]

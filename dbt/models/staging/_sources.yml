@@ -1,0 +1,30 @@
+version: 2
+
+sources:
+  - name: oulad_silver
+    description: >
+      Silver Iceberg tables written by the Spark jobs (src/edtech_analytics/spark). On DuckDB they are
+      read in place with iceberg_scan() from the local Hadoop-catalog warehouse; on Athena the same
+      source names resolve to Glue Data Catalog tables in the silver database.
+    # Glue database on Athena (e.g. edtech_dev_silver); ignored by DuckDB, which reads the files.
+    schema: "{{ env_var('EDTECH_SILVER_SCHEMA', 'silver') }}"
+    meta:
+      # EDTECH_LAKE_WAREHOUSE: the Iceberg warehouse the Spark jobs wrote (local Hadoop catalog).
+      external_location: "iceberg_scan('{{ env_var('EDTECH_LAKE_WAREHOUSE', '../data/warehouse') }}/silver/{name}')"
+    tables:
+      - name: courses
+        description: One row per module presentation.
+      - name: assessments
+        description: One row per assessment (TMA, CMA, Exam) of a presentation.
+      - name: vle_sites
+        description: One row per VLE material (the release's vle.csv).
+      - name: students
+        description: One row per student enrolment (studentInfo.csv) with demographics and outcome.
+      - name: registrations
+        description: Registration and unregistration day per enrolment.
+      - name: student_assessments
+        description: One row per submitted assessment result.
+      - name: student_weekly_activity
+        description: Clickstream aggregated by Spark to enrolment x course week x activity type.
+      - name: student_weekly_engagement
+        description: Clickstream aggregated by Spark to enrolment x course week.

@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: int_enrolments
+    description: One row per student enrolment with demographics, registration timing and outcome flags.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [code_module, code_presentation, id_student]
+    columns:
+      - name: registration_cohort
+        description: "early (registered > 30 days before start), on_time (0-30 days before), late (after start), unknown."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["early", "on_time", "late", "unknown"]
+      - name: domain
+        data_tests: [not_null]
+  - name: int_assessment_submissions
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [id_assessment, id_student]
+  - name: int_enrolment_activity
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [code_module, code_presentation, id_student]
+    columns:
+      - name: total_clicks
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 1

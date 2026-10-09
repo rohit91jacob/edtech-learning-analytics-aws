@@ -1,0 +1,48 @@
+name: edtech
+version: "1.0.0"
+config-version: 2
+profile: edtech
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: target
+clean-targets: ["target", "logs"]
+
+vars:
+  # Score at or above which an assessment counts as "mastered" (our definition, see data dictionary).
+  mastery_threshold: 70
+  # OULAD's own pass mark for an assessment (Kuzilek et al. 2017: "lower than 40 is interpreted as Fail").
+  pass_threshold: 40
+  # Withdrawal-risk features are computed as of this course day (day 0 = presentation start).
+  risk_cutoff_day: 28
+  # Presentation held out to evaluate the risk model.
+  holdout_presentation: "2014J"
+  # Slices with fewer enrolments than this are flagged as too small to read.
+  min_slice_size: 100
+
+models:
+  edtech:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: table
+      +table_type: iceberg
+    marts:
+      +schema: marts
+      +materialized: table
+      +table_type: iceberg
+
+seeds:
+  edtech:
+    +schema: reference
+
+data_tests:
+  edtech:
+    +store_failures: false
+
+flags:
+  send_anonymous_usage_stats: false
