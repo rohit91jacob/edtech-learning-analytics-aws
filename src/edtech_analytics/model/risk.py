@@ -74,7 +74,10 @@ class ModelReport:
 
 
 def load_features(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.execute("SELECT * FROM marts.mart_dropout_risk_features").df()
+    # A stable row order keeps the seeded bootstrap (and the whole report) reproducible.
+    return con.execute(
+        "SELECT * FROM marts.mart_dropout_risk_features ORDER BY presentation_key, id_student"
+    ).df()
 
 
 def build_pipeline() -> Pipeline:
