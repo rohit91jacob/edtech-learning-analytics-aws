@@ -2,8 +2,9 @@
 
 * the raw zone lands in S3 and a second landing uploads nothing;
 * the Terraform-rendered state machine is accepted by Step Functions, and an execution takes the
-  failure path (LocalStack community has no EMR Serverless, so the first task fails), which
-  proves the Catch -> NotifyFailure (SNS) -> Fail wiring end to end in a real ASL interpreter.
+  failure path, which proves the Catch -> NotifyFailure (SNS) -> Fail wiring end to end in a real
+  ASL interpreter. LocalStack community does not implement the EMR Serverless .sync integration,
+  so the executed copy swaps the EMR tasks for a publish to a missing SNS topic (see the test).
 """
 
 from __future__ import annotations
@@ -79,8 +80,21 @@ def test_state_machine_failure_path():
         }
     )
     sfn = client("stepfunctions")
-    arn = sfn.create_state_machine(
+    # The Terraform-rendered definition itself must be accepted as-is.
+    sfn.create_state_machine(
         name="edtech-dev-pipeline", definition=json.dumps(definition), roleArn=role
+    )
+    # LocalStack community rejects the emr-serverless startJobRun.sync integration before the first
+    # state is entered, so the execution runs a copy whose EMR tasks publish to a topic that does
+    # not exist instead. The task still fails inside a real ASL interpreter, so the run still
+    # exercises the definition's own Retry/Catch -> NotifyFailure (SNS) -> Fail wiring.
+    missing_topic = f"arn:aws:sns:{REGION}:{ACCOUNT}:edtech-dev-does-not-exist"
+    for state in definition["States"].values():
+        if state.get("Resource") == "arn:aws:states:::emr-serverless:startJobRun.sync":
+            state["Resource"] = "arn:aws:states:::sns:publish"
+            state["Parameters"] = {"TopicArn": missing_topic, "Message": "unreachable"}
+    arn = sfn.create_state_machine(
+        name="edtech-dev-pipeline-failure-path", definition=json.dumps(definition), roleArn=role
     )["stateMachineArn"]
     execution = sfn.start_execution(stateMachineArn=arn, input="{}")["executionArn"]
     status = "RUNNING"
